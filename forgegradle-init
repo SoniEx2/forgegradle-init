@@ -1,0 +1,379 @@
+#!/usr/bin/env lua
+
+--[[
+  USAGE:
+    forgegradle-init [--nogit] group modid modname modversion forgeversion
+  EXAMPLE:
+    forgegradle-init com.github.soniex2.endermoneymod endermoneymod "EnderMoney" 1.0 1.7.10-10.13.3.1393-1710ls
+    
+    Makes a new mod with name EnderMoney, modid endermoneymod, package com.github.soniex2.endermoneymod, version 1.0, mcversion 1.7.10
+--]]
+
+local options = {}
+local file_templates
+
+do
+
+  local escape_jstr_codes = {
+    ['"'] = [[\"]],
+    ["'"] = [[\']],
+    ["\t"] = [[\t]],
+    ["\n"] = [[\n]],
+    ["\r"] = [[\r]],
+    ["\b"] = [[\b]],
+    ["\f"] = [[\f]],
+    ["\\"] = [[\\]],
+  }
+  -- TODO check correctness
+  local function escape_jstr(s)
+    local t = {}
+    local i = 0
+    for p, c in utf8.codes(s) do
+      i = i + 1
+      if escape_jstr_codes[c] then -- nonprintables, \, ' and "
+        t[i] = escape_jstr_codes[c]
+      elseif c < 0x20 or (c >= 0x7F and c <= 0x9F) then -- other nonprintables
+        t[i] = string.format("\\u00%02X", c)
+      else
+        t[i] = utf8.char(c)
+      end
+    end
+    return table.concat(t, "", 1, i)
+  end
+
+  local escape_json_codes = {
+    ['"'] = [[\"]],
+    ["\t"] = [[\t]],
+    ["\n"] = [[\n]],
+    ["\r"] = [[\r]],
+    ["\b"] = [[\b]],
+    ["\f"] = [[\f]],
+    ["\\"] = [[\\]],
+  }
+  -- TODO check correctness
+  local function escape_json(s)
+    local t = {}
+    local i = 0
+    for p, c in utf8.codes(s) do
+      i = i + 1
+      if escape_json_codes[c] then -- nonprintables, \, ' and "
+        t[i] = escape_json_codes[c]
+      elseif c < 0x20 or (c >= 0x7F and c <= 0x9F) then -- other nonprintables
+        t[i] = string.format("\\u00%02X", c)
+      else
+        t[i] = utf8.char(c)
+      end
+    end
+    return table.concat(t, "", 1, i)
+  end
+
+  local function MODID(group,modid,modname,modversion,forgeversion)
+    return modid
+  end
+  local function MODNAME(group,modid,modname,modversion,forgeversion)
+    return modname
+  end
+  local function VERSION(group,modid,modname,modversion,forgeversion)
+    return modversion
+  end
+  local function MCVERSION(group,modid,modname,modversion,forgeversion)
+    return forgeversion
+  end
+  local function GROUP(group,modid,modname,modversion,forgeversion)
+    return group
+  end
+  local author
+  local function AUTHOR(group,modid,modname,modversion,forgeversion)
+    if author then return author end
+    if options.use_git then -- use git
+      local f, err = io.popen("git var GIT_AUTHOR_IDENT")
+      if f then
+        author = f:read():match("(.+) <[^ ]+> [0-9]+ [-+][0-9][0-9][0-9][0-9]$")
+        if not author then
+          author = ""
+          io.stderr:write("[Warning] Couldn't find author information.\n")
+        end
+        f:close()
+      else -- fallback to system user
+        author = os.getenv("USER")
+        if not author then
+          author = ""
+          io.stderr:write("[Warning] Couldn't find author information.\n")
+        end
+      end
+    else -- use system user
+      author = os.getenv("USER")
+      if not author then
+        author = ""
+        io.stderr:write("[Warning] Couldn't find author information.\n")
+      end
+    end
+    return author
+  end
+
+  local JAVA = setmetatable({}, {__index=function(t,f)
+        local r = function(...)
+          return escape_jstr(f(...))
+        end
+        t[f] = r
+        return r
+      end})
+  local GROOVY = JAVA -- alias; just be careful to use '' instead of ""
+  local JAVA_COMMENT = setmetatable({}, {__index=function(t,f)
+        local r = function(...)
+          return escape_jstr(f(...):gsub("*/",""))
+        end
+        t[f] = r
+        return r
+      end})
+  local JSON = setmetatable({}, {__index=function(t,f)
+        local r = function(...)
+          return escape_json(f(...))
+        end
+        t[f] = r
+        return r
+      end})
+
+
+  file_templates = {
+    ["build.gradle"] = {[[buildscript {
+    repositories {
+        mavenCentral()
+        maven {
+            name = "forge"
+            url = "http://files.minecraftforge.net/maven"
+        }
+        maven {
+            name = "sonatype"
+            url = "https://oss.sonatype.org/content/repositories/snapshots/"
+        }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:1.2-SNAPSHOT'
+    }
+}
+
+apply plugin: 'forge'
+
+idea { module { inheritOutputDirs = true } }
+
+version = '%s'
+group = '%s' // http://maven.apache.org/guides/mini/guide-naming-conventions.html
+archivesBaseName = '%s'
+
+minecraft {
+    version = '%s'
+    runDir = "eclipse"
+}
+
+repositories {
+    maven { url = "http://maven.cil.li/" }
+}
+
+dependencies {
+    // you may put jars on which you depend on in ./libs
+    // or you may define them like so..
+    //compile "some.group:artifact:version:classifier"
+    //compile "some.group:artifact:version"
+
+    // real examples
+    //compile 'com.mod-buildcraft:buildcraft:6.0.8:dev'  // adds buildcraft to the dev env
+    //compile 'com.googlecode.efficient-java-matrix-library:ejml:0.24' // adds ejml to the dev env
+
+    // for more info...
+    // http://www.gradle.org/docs/current/userguide/artifact_dependencies_tutorial.html
+    // http://www.gradle.org/docs/current/userguide/dependency_management.html
+
+}
+
+processResources {
+    // this will ensure that this task is redone when the versions change.
+    inputs.property "version", project.version
+    inputs.property "mcversion", project.minecraft.version
+
+    // replace stuff in mcmod.info, nothing else
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+
+        // replace version and mcversion
+        expand 'version': project.version, 'mcversion': project.minecraft.version
+    }
+
+    // copy everything else, thats not the mcmod.info
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info'
+    }
+}
+]], GROOVY[VERSION], GROOVY[GROUP], GROOVY[MODNAME], GROOVY[MCVERSION]},
+    ["src"] = {{
+        ["main"] = {{
+            ["java"] = {{
+                ["resources"] = {{
+                    ["mcmod.info"] = {[[
+[
+{
+  "modid": "%s",
+  "name": "%s",
+  "description": "",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["%s"],
+  "credits": "",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]
+]], JSON[MODID], JSON[MODNAME], JSON[AUTHOR]},
+                  }},
+                [function(group,modid,modname,modversion,forgeversion)
+                  return group:match("^([^.]+)%.")
+                end] = function(group,modid,modname,modversion,forgeversion)
+                  local s = group:match("^[^.]+%.(.+)")
+                  local t = {{}}
+                  local x = t[1]
+                  for m in s:gmatch("([^.]+)%.?") do
+                    x[m] = {{}}
+                    x = x[m][1]
+                  end
+                  x[modname:gsub("[^A-Za-z0-9_]", "") .. ".java"] = {[[package %s;
+
+import cpw.mods.fml.common.Mod;
+import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+
+/**
+ * @author %s
+ */
+@Mod(modid = "%s", name = "%s", version = "%s")
+public class %s {
+
+    @Mod.EventHandler
+    public void preInit(final FMLPreInitializationEvent event) {
+        
+    }
+}
+]], "group", JAVA_COMMENT[AUTHOR], JAVA[MODID], JAVA[MODNAME], JAVA[VERSION], function(group,modid,modname,modversion,forgeversion) return modname:gsub("[^A-Za-z0-9_]", "") end}
+                  return t
+                end,
+              }},
+          }},
+      }},
+  }
+end
+
+do
+  local lfs = require"lfs"
+  local http = require"socket.http"
+  local json = require"json"
+
+  options.use_git = true
+  local group,modid,modname,modversion,forgeversion
+
+  do
+    local temp = {}
+    local haserr = false
+    for i,v in ipairs(arg) do
+      if v:find("^%-%-") == 1 then
+        if v == "--nogit" then
+          options.use_git = false
+        else
+          io.stderr:write("Unrecognized option: ", v, "\n")
+          haserr = true
+        end
+      else
+        temp[#temp+1] = v
+      end
+    end
+    if haserr then os.exit(1) end
+    -- unpack
+    group,modid,modname,modversion,forgeversion = (unpack or table.unpack)(temp)
+    if not forgeversion then
+      io.stderr:write("Usage: [--nogit] group modid modname modversion forgeversion\n")
+      os.exit(1)
+    end
+  end
+
+  local b,c,h,s = http.request"http://files.minecraftforge.net/maven/net/minecraftforge/forge/json"
+  if not b or c ~= 200 then
+    io.stderr:write("[Warning] Couldn't download Forge JSON: ", tostring(s), '\n')
+    io.stderr:write("[Warning] Assuming ", tostring(forgeversion), " is a valid Forge version.\n")
+  else
+    local forgejson = json.decode(b)
+    if forgejson.promos[forgeversion] then
+      local v = forgejson.number[tostring(forgejson.promos[forgeversion])]
+      forgeversion = v.mcversion .. "-" .. v.version
+      if type(v.branch) == "string" then forgeversion = forgeversion .. "-" .. v.branch end
+    elseif forgejson.number[forgeversion] then
+      local v = forgejson.number[forgeversion]
+      forgeversion = v.mcversion .. "-" .. v.version
+      if v.branch then forgeversion = forgeversion .. "-" .. v.branch end
+    else
+      io.stderr:write("[Warning] Assuming ", tostring(forgeversion), " is a valid Forge version.\n")
+    end
+  end
+
+  local tvalues = {
+    group=group,
+    modid=modid,
+    modname=modname,
+    modversion=modversion,
+    forgeversion=forgeversion
+  }
+
+  -- first things first
+  if (not os.execute("gradle init")) then
+    io.stderr:write("[Warning] gradle init failed!\n")
+  end
+
+  if (options.use_git and not os.execute("git init")) then
+    io.stderr:write("[Warning] git init failed!\n")
+  end
+
+  local function processDir(basepath, dir)
+    for path, contents in pairs(dir) do
+      local path = path -- DO NOT REMOVE THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING!
+      if type(path) == "function" then
+        path = path(group,modid,modname,modversion,forgeversion)
+      end
+      if type(path) == "string" then
+        path = basepath .. path:gsub("^/+", ""):gsub("/+$", "")
+      else
+        error()
+      end
+      if type(contents) == "function" then
+        contents = contents(group,modid,modname,modversion,forgeversion)
+      end
+      local filecontents = contents[1]
+      if type(filecontents) == "string" then
+        local repl = {}
+        for i,v in ipairs(contents) do
+          if i>1 then
+            if type(v) == "string" then
+              repl[i-1] = tvalues[v]
+            elseif type(v) == "function" then
+              repl[i-1] = v(group,modid,modname,modversion,forgeversion)
+            end
+          end
+        end
+        local newfilecontents = filecontents:format(unpack(repl))
+        local f, err = io.open(path, "w")
+        if not f then io.stderr:write("Couldn't open ", path, ": ", err, "\n") os.exit(1) end
+        local s, err = f:write(newfilecontents)
+        if not s then io.stderr:write("Couldn't write to ", path, ": ", err, "\n") os.exit(1) end
+        f:close()
+      elseif type(filecontents) == "table" then
+        local s, err = lfs.mkdir(path)
+        if not s then io.stderr:write("Couldn't create directory ", path, ": ", err, "\n") os.exit(1) end
+        processDir(path .. "/", filecontents)
+      else
+        error()
+      end
+    end
+  end
+
+  processDir("", file_templates)
+
+  os.execute("gradle setupDecompWorkspace")
+end
