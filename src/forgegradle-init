@@ -207,9 +207,8 @@ processResources {
 ]], GROOVY[VERSION], GROOVY[GROUP], GROOVY[MODNAME], GROOVY[MCVERSION]},
     ["src"] = {{
         ["main"] = {{
-            ["java"] = {{
-                ["resources"] = {{
-                    ["mcmod.info"] = {[[
+            ["resources"] = {{
+                ["mcmod.info"] = {[[
 [
 {
   "modid": "%s",
@@ -227,7 +226,8 @@ processResources {
 }
 ]
 ]], JSON[MODID], JSON[MODNAME], JSON[AUTHOR]},
-                  }},
+              }},
+            ["java"] = {{
                 [function(group,modid,modname,modversion,forgeversion)
                   return group:match("^([^.]+)%.")
                 end] = function(group,modid,modname,modversion,forgeversion)
